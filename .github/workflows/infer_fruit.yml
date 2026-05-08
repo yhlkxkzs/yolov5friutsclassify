@@ -1,0 +1,101 @@
+name: Fruit detection (YOLOv5s / YOLOv5 hub)
+
+on:
+  push:
+    paths:
+      - "incoming/**"
+  workflow_dispatch:
+
+jobs:
+  infer:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: POST 新图片到自建服务器（可选）
+        env:
+          UPLOAD_URL: ${{ secrets.FRUIT_SERVER_UPLOAD_URL }}
+          UPLOAD_TOKEN: ${{ secrets.FRUIT_SERVER_UPLOAD_TOKEN }}
+        run: |
+          if [ -z "$UPLOAD_URL" ]; then
+            echo "未配置 FRUIT_SERVER_UPLOAD_URL，跳过转发。"
+            exit 0
+          fi
+
+          collect_files() {
+            if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+              find incoming -type f \( -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.png' -o -iname '*.webp' -o -iname '*.bmp' \) 2>/dev/null | sort -u
+              return
+            fi
+            BEFORE="${{ github.event.before }}"
+            AFTER="${{ github.sha }}"
+            if [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
+              find incoming -type f \( -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.png' -o -iname '*.webp' -o -iname '*.bmp' \) 2>/dev/null | sort -u
+              return
+            fi
+            git diff --name-only --diff-filter=ACMRT "$BEFORE" "$AFTER" | grep -E '^incoming/' || true
+          }
+
+          N=0
+          while IFS= read -r f; do
+            [ -z "$f" ] && continue
+            [ ! -f "$f" ] && continue
+            echo "Uploading: $f"
+            OK=0
+            if [ -n "$UPLOAD_TOKEN" ]; then
+              curl -fsS -X POST "$UPLOAD_URL" \
+                -H "Authorization: Bearer $UPLOAD_TOKEN" \
+                -F "file=@${f};type=application/octet-stream" \
+                -F "path=${f}" \
+                -F "commit=${{ github.sha }}" \
+                -F "repo=${{ github.repository }}" && OK=1 || echo "::warning::上传失败: $f"
+            else
+              curl -fsS -X POST "$UPLOAD_URL" \
+                -F "file=@${f};type=application/octet-stream" \
+                -F "path=${f}" \
+                -F "commit=${{ github.sha }}" \
+                -F "repo=${{ github.repository }}" && OK=1 || echo "::warning::上传失败: $f"
+            fi
+            [ "$OK" = 1 ] && N=$((N+1))
+          done < <(collect_files)
+
+          if [ "$N" -eq 0 ]; then
+            echo "没有需要转发的图片文件。"
+          else
+            echo "已转发 ${N} 个文件。"
+          fi
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install PyTorch (CPU) and YOLOv5 hub 依赖
+        run: |
+          pip install --upgrade pip
+          pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+          pip install -r requirements.txt
+
+      - name: Run detection
+        id: infer
+        env:
+          TORCH_HOME: ${{ github.workspace }}/.torch
+        run: |
+          python scripts/infer_fruit_detect.py --device cpu --weights models/yolov5s_fruit_detect_best.pt --incoming incoming --output output/predictions.json
+          if [ -f output/predictions.json ]; then
+            echo "## 检测结果" >> "$GITHUB_STEP_SUMMARY"
+            echo '```json' >> "$GITHUB_STEP_SUMMARY"
+            cat output/predictions.json >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "无 output/predictions.json（可能 incoming/ 下没有图片）" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload predictions artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: predictions
+          path: output/predictions.json
+          if-no-files-found: ignore

@@ -1,0 +1,11 @@
+name: Reachability test
+on: workflow_dispatch
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Try reach server
+        run: |
+          set -x
+          curl -v --connect-timeout 10 --max-time 15 "http://202.121.181.5:10022/"

@@ -1,0 +1,15 @@
+{
+  "model_arch": "yolov5s",
+  "checkpoint_format": "yolov5_ultralytics_hub",
+  "task": "detect",
+  "num_classes": 6,
+  "classes": [
+    "Early-Turning",
+    "Green",
+    "Late-Turning",
+    "Red",
+    "Turning",
+    "White"
+  ],
+  "training_run": "fruit_detection_formal100_20260430_164036"
+}

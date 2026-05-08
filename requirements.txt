@@ -1,0 +1,15 @@
+# 本地 / CI：配合 torch.hub ultralytics/yolov5 加载 custom 权重
+# PyTorch CPU 建议在 CI 使用：--index-url https://download.pytorch.org/whl/cpu
+torch>=2.0
+torchvision>=0.15
+ultralytics>=8.4.0
+pandas>=1.1
+opencv-python-headless>=4.1
+seaborn>=0.11
+matplotlib>=3.3
+PyYAML>=5.4
+requests>=2.23
+scipy>=1.4
+tqdm>=4.64
+Pillow>=8.0
+gitpython>=3.1
