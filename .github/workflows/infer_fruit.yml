@@ -7,8 +7,7 @@ on:
     branches: [main]
     paths:
       - 'incoming/**'
-    paths-ignore:
-      - 'incoming/**/*.afsa.json'
+      - '!incoming/**/*.afsa.json'
   workflow_dispatch:
 
 permissions:
