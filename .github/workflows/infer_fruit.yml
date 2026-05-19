@@ -33,23 +33,26 @@ jobs:
         run: mkdir -p out && echo detect > out/afsa_repo_kind.txt
 
       - name: Prepare category-only staging
-        if: steps.route.outputs.category_count != '0'
+        if: contains(steps.route.outputs.task_types, 'fruit_category')
         run: python3 .github/scripts/afsa_prepare_infer_staging.py
 
       - uses: actions/setup-python@v5
-        if: steps.route.outputs.category_count != '0' || github.event_name == 'workflow_dispatch'
+        if: contains(steps.route.outputs.task_types, 'fruit_category')
         with:
           python-version: '3.11'
 
       - name: Install dependencies
-        if: steps.route.outputs.category_count != '0' || github.event_name == 'workflow_dispatch'
+        if: contains(steps.route.outputs.task_types, 'fruit_category')
         run: |
           pip install --upgrade pip
           pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
-          pip install pillow ultralytics opencv-python-headless
+          pip install pillow opencv-python-headless pandas scipy pyyaml tqdm matplotlib seaborn requests
+          pip install ultralytics
+          # YOLOv3/v5 权重经 torch.hub ultralytics/yolov5 加载时的依赖
+          pip install git+https://github.com/ultralytics/yolov5.git@v7.0 || true
 
       - name: Run fruit category detection
-        if: steps.route.outputs.category_count != '0' || github.event_name == 'workflow_dispatch'
+        if: contains(steps.route.outputs.task_types, 'fruit_category')
         run: |
           INCOMING_DIR="/tmp/afsa_infer_staging"
           if [ ! -d "$INCOMING_DIR/incoming" ] && [ "${{ github.event_name }}" = "workflow_dispatch" ]; then

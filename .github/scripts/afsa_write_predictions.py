@@ -40,11 +40,22 @@ def index_entries(routing: dict) -> dict[str, dict]:
     return idx
 
 
+def detection_top_label(partial_row: dict) -> tuple[str, float]:
+    dets = partial_row.get("detections") or []
+    if not dets:
+        return "", 0.0
+    best = max(dets, key=lambda d: float(d.get("confidence") or 0))
+    return str(best.get("class") or ""), normalize_confidence(best.get("confidence", 0))
+
+
 def app_row_from_infer(partial_row: dict, ent: dict) -> dict:
     gh = ent.get("github_path") or ent.get("repo_image_path", "")
     raw = partial_row.get("raw_class") or partial_row.get("predicted_class") or ""
+    conf = partial_row.get("confidence")
+    if not raw and partial_row.get("detections"):
+        raw, conf = detection_top_label(partial_row)
     display = partial_row.get("predicted_class") or raw
-    conf = normalize_confidence(partial_row.get("confidence", 0))
+    conf = normalize_confidence(conf if conf is not None else 0)
 
     row: dict = {
         "image": gh,
