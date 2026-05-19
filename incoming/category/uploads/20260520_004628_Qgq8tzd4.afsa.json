@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "app": "afsa_mobile",
+  "detection_type": "category",
+  "task_type": "fruit_category",
+  "image_path": "incoming/category/uploads/20260520_004628_Qgq8tzd4.webp",
+  "github_model_target_id": "yolov5_fruits",
+  "afsa_detection_id": "rec_1779209187751",
+  "uploaded_at": "2026-05-19T16:46:28.077821Z"
+}
