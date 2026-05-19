@@ -13,6 +13,7 @@ on:
 
 permissions:
   contents: read
+  actions: write
 
 jobs:
   infer:
@@ -60,9 +61,9 @@ jobs:
             --incoming "$INCOMING_DIR" \
             --output output/predictions_partial.json
 
-      - name: Merge predictions (incl. growth/disease skipped)
+      - name: Write predictions.json (App 匹配字段)
         if: always()
-        run: python3 .github/scripts/afsa_finalize_predictions.py
+        run: python3 .github/scripts/afsa_write_predictions.py
 
       - name: Summary
         if: always() && hashFiles('output/predictions.json') != ''

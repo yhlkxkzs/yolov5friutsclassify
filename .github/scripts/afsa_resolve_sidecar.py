@@ -15,11 +15,11 @@ def all_incoming_images() -> list[str]:
     root = Path("incoming")
     if not root.is_dir():
         return []
-    out: list[str] = []
-    for p in sorted(root.rglob("*")):
-        if p.is_file() and p.suffix.lower() in IMAGE_EXTS:
-            out.append(p.as_posix())
-    return out
+    return [
+        p.as_posix()
+        for p in sorted(root.rglob("*"))
+        if p.is_file() and p.suffix.lower() in IMAGE_EXTS
+    ]
 
 
 def changed_images() -> list[str]:
@@ -36,12 +36,20 @@ def changed_images() -> list[str]:
 
 def load_sidecar(image_path: str) -> dict | None:
     p = Path(image_path)
-    candidates = [p.with_suffix(".afsa.json"), p.parent / f"{p.stem}.afsa.json"]
-    for sidecar in candidates:
+    for sidecar in (p.with_suffix(".afsa.json"), p.parent / f"{p.stem}.afsa.json"):
         if sidecar.is_file():
             with sidecar.open(encoding="utf-8") as f:
                 return json.load(f)
     return None
+
+
+def github_path_for(meta: dict | None, repo_image_path: str) -> str:
+    """App 匹配键：优先 sidecar.image_path，与上传路径完全一致。"""
+    if meta:
+        ip = str(meta.get("image_path", "") or "").strip()
+        if ip:
+            return ip.replace("\\", "/")
+    return repo_image_path.replace("\\", "/")
 
 
 def bucket_task(meta: dict | None) -> str:
@@ -53,30 +61,27 @@ def bucket_task(meta: dict | None) -> str:
         return "growth"
     if tt.startswith("disease_") or dt == "disease":
         return "disease"
-    if tt == "fruit_category" or dt == "category":
-        return "fruit_category"
     return "fruit_category"
 
 
-def entry_from(meta: dict | None, image: str, bucket: str) -> dict:
-    base = {
-        "image": image,
+def entry_from(meta: dict | None, repo_image_path: str, bucket: str) -> dict:
+    gh = github_path_for(meta, repo_image_path)
+    return {
+        "repo_image_path": repo_image_path,
+        "github_path": gh,
+        "image_path_sidecar": (meta or {}).get("image_path"),
         "bucket": bucket,
         "task_type": (meta or {}).get("task_type", "fruit_category"),
         "detection_type": (meta or {}).get("detection_type", "category"),
         "client_preset": (meta or {}).get("client_preset"),
         "afsa_detection_id": (meta or {}).get("afsa_detection_id"),
         "github_model_target_id": (meta or {}).get("github_model_target_id"),
+        "sidecar_missing": meta is None,
     }
-    if meta is None:
-        base["task_type"] = "fruit_category"
-        base["detection_type"] = "category"
-        base["sidecar_missing"] = True
-    return base
 
 
 def main() -> int:
-    routing = {
+    routing: dict = {
         "schema_version": 1,
         "fruit_category": [],
         "growth": [],
