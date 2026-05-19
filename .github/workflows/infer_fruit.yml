@@ -1,10 +1,18 @@
-name: Fruit detection (YOLOv5s / YOLOv5 hub)
+# 复制到 YOLO 检测模型仓：.github/workflows/infer_fruit.yml
+
+name: Fruit detection (YOLOv5s)
 
 on:
   push:
+    branches: [main]
     paths:
-      - "incoming/**"
+      - 'incoming/**'
+    paths-ignore:
+      - 'incoming/**/*.afsa.json'
   workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   infer:
@@ -12,88 +20,59 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 2
 
-      - name: POST 新图片到自建服务器（可选）
+      - name: Route by sidecar (.afsa.json)
+        id: route
         env:
-          UPLOAD_URL: ${{ secrets.FRUIT_SERVER_UPLOAD_URL }}
-          UPLOAD_TOKEN: ${{ secrets.FRUIT_SERVER_UPLOAD_TOKEN }}
-        run: |
-          if [ -z "$UPLOAD_URL" ]; then
-            echo "未配置 FRUIT_SERVER_UPLOAD_URL，跳过转发。"
-            exit 0
-          fi
+          AFSA_SCAN_ALL: ${{ github.event_name == 'workflow_dispatch' && '1' || '' }}
+        run: python3 .github/scripts/afsa_resolve_sidecar.py
 
-          collect_files() {
-            if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-              find incoming -type f \( -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.png' -o -iname '*.webp' -o -iname '*.bmp' \) 2>/dev/null | sort -u
-              return
-            fi
-            BEFORE="${{ github.event.before }}"
-            AFTER="${{ github.sha }}"
-            if [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
-              find incoming -type f \( -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.png' -o -iname '*.webp' -o -iname '*.bmp' \) 2>/dev/null | sort -u
-              return
-            fi
-            git diff --name-only --diff-filter=ACMRT "$BEFORE" "$AFTER" | grep -E '^incoming/' || true
-          }
+      - name: Mark repo kind
+        run: mkdir -p out && echo detect > out/afsa_repo_kind.txt
 
-          N=0
-          while IFS= read -r f; do
-            [ -z "$f" ] && continue
-            [ ! -f "$f" ] && continue
-            echo "Uploading: $f"
-            OK=0
-            if [ -n "$UPLOAD_TOKEN" ]; then
-              curl -fsS -X POST "$UPLOAD_URL" \
-                -H "Authorization: Bearer $UPLOAD_TOKEN" \
-                -F "file=@${f};type=application/octet-stream" \
-                -F "path=${f}" \
-                -F "commit=${{ github.sha }}" \
-                -F "repo=${{ github.repository }}" && OK=1 || echo "::warning::上传失败: $f"
-            else
-              curl -fsS -X POST "$UPLOAD_URL" \
-                -F "file=@${f};type=application/octet-stream" \
-                -F "path=${f}" \
-                -F "commit=${{ github.sha }}" \
-                -F "repo=${{ github.repository }}" && OK=1 || echo "::warning::上传失败: $f"
-            fi
-            [ "$OK" = 1 ] && N=$((N+1))
-          done < <(collect_files)
-
-          if [ "$N" -eq 0 ]; then
-            echo "没有需要转发的图片文件。"
-          else
-            echo "已转发 ${N} 个文件。"
-          fi
+      - name: Prepare category-only staging
+        if: steps.route.outputs.category_count != '0'
+        run: python3 .github/scripts/afsa_prepare_infer_staging.py
 
       - uses: actions/setup-python@v5
+        if: steps.route.outputs.category_count != '0' || github.event_name == 'workflow_dispatch'
         with:
-          python-version: "3.11"
+          python-version: '3.11'
 
-      - name: Install PyTorch (CPU) and YOLOv5 hub 依赖
+      - name: Install dependencies
+        if: steps.route.outputs.category_count != '0' || github.event_name == 'workflow_dispatch'
         run: |
           pip install --upgrade pip
           pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
-          pip install -r requirements.txt
+          pip install pillow ultralytics opencv-python-headless
 
-      - name: Run detection
-        id: infer
-        env:
-          TORCH_HOME: ${{ github.workspace }}/.torch
+      - name: Run fruit category detection
+        if: steps.route.outputs.category_count != '0' || github.event_name == 'workflow_dispatch'
         run: |
-          python scripts/infer_fruit_detect.py --device cpu --weights models/yolov5s_fruit_detect_best.pt --incoming incoming --output output/predictions.json
-          if [ -f output/predictions.json ]; then
-            echo "## 检测结果" >> "$GITHUB_STEP_SUMMARY"
-            echo '```json' >> "$GITHUB_STEP_SUMMARY"
-            cat output/predictions.json >> "$GITHUB_STEP_SUMMARY"
-            echo '```' >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo "无 output/predictions.json（可能 incoming/ 下没有图片）" >> "$GITHUB_STEP_SUMMARY"
+          INCOMING_DIR="/tmp/afsa_infer_staging"
+          if [ ! -d "$INCOMING_DIR/incoming" ] && [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            INCOMING_DIR="incoming"
           fi
+          python scripts/infer_fruit_detect.py \
+            --device cpu \
+            --weights models/yolov5s_fruit_detect_best.pt \
+            --incoming "$INCOMING_DIR" \
+            --output output/predictions_partial.json
 
-      - name: Upload predictions artifact
-        uses: actions/upload-artifact@v4
+      - name: Merge predictions (incl. growth/disease skipped)
+        if: always()
+        run: python3 .github/scripts/afsa_finalize_predictions.py
+
+      - name: Summary
+        if: always() && hashFiles('output/predictions.json') != ''
+        run: |
+          echo "## AFSA 检测结果" >> "$GITHUB_STEP_SUMMARY"
+          echo '```json' >> "$GITHUB_STEP_SUMMARY"
+          cat output/predictions.json >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: predictions
